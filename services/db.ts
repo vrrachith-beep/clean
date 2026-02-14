@@ -72,6 +72,43 @@ export const activateUserTag = async (userId: string, name: string): Promise<voi
   await setDoc(userRef, { ...base, id: userId, name: name.trim() });
 };
 
+// Fallback activation via Firestore REST API for clients where SDK transport reports offline.
+export const activateUserTagViaRest = async (
+  userId: string,
+  name: string,
+  firebaseApiKey: string,
+  firebaseProjectId: string,
+): Promise<void> => {
+  const initial = INITIAL_USERS.find((u) => u.id === userId);
+  const code = initial?.code ?? '';
+
+  const body = {
+    fields: {
+      id: { stringValue: userId },
+      name: { stringValue: name.trim() },
+      code: { stringValue: code },
+      points: { integerValue: '1000' },
+      scanCount: { integerValue: '0' },
+      violationHistory: { arrayValue: {} },
+    },
+  };
+
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${firebaseProjectId}/databases/(default)/documents/users/${userId}` +
+    `?key=${encodeURIComponent(firebaseApiKey)}`;
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`REST activation failed (${res.status}): ${text}`);
+  }
+};
+
 // Update a single user in Firestore
 export const updateUser = async (user: User): Promise<void> => {
   await setDoc(doc(usersCollection, user.id), user);

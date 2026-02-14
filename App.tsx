@@ -4,6 +4,7 @@ import { User, ScanLog, LedgerEntry } from './types';
 import {
   initializeUsers,
   activateUserTag,
+  activateUserTagViaRest,
   saveUsers,
   subscribeToUsers,
   subscribeToScanLogs,
@@ -14,7 +15,7 @@ import { Leaderboard } from './components/Leaderboard';
 import { Analytics } from './components/Analytics';
 import { Badges } from './components/Badges';
 import { QRRegistry } from './components/QRRegistry';
-import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS } from './constants';
+import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './constants';
 import { GoogleGenAI } from "@google/genai";
 
 const App: React.FC = () => {
@@ -28,6 +29,7 @@ const App: React.FC = () => {
   const [scanResult, setScanResult] = useState<{ type: 'success' | 'error' | 'info'; message: string; data?: any } | null>(null);
   const [showIdentityMenu, setShowIdentityMenu] = useState(false);
   const [registrationName, setRegistrationName] = useState('');
+  const [isActivatingTag, setIsActivatingTag] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,6 +78,9 @@ const App: React.FC = () => {
     if (lower.includes('permission-denied')) {
       return 'Tag activation failed: Firestore permission denied. Update your Firestore rules.';
     }
+    if (lower.includes('offline') || lower.includes('unavailable')) {
+      return 'Tag activation failed: Device appears offline for Firestore. Check network and retry.';
+    }
     if (lower.includes('project') || lower.includes('api key') || lower.includes('auth')) {
       return 'Tag activation failed: Firebase config is missing/invalid. Set VITE_FIREBASE_* environment values.';
     }
@@ -116,12 +121,46 @@ const App: React.FC = () => {
 
   const handleRegister = async () => {
     if (!registrationName.trim()) return;
+    setIsActivatingTag(true);
     try {
       await activateUserTag(currentUserId, registrationName.trim());
+      const local = users.find((u) => u.id === currentUserId) ?? INITIAL_USERS.find((u) => u.id === currentUserId);
+      if (local) {
+        setUsers((prev) => {
+          const next = prev.filter((u) => u.id !== currentUserId);
+          return [{ ...local, name: registrationName.trim() }, ...next];
+        });
+      }
       setRegistrationName('');
       setScanResult({ type: 'success', message: 'Tag activated successfully.' });
     } catch (error) {
-      setScanResult({ type: 'error', message: getDbErrorMessage(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      const lower = message.toLowerCase();
+      if (lower.includes('offline') || lower.includes('unavailable')) {
+        try {
+          const apiKey = import.meta.env.VITE_FIREBASE_API_KEY as string;
+          const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID as string;
+          if (!apiKey || !projectId) {
+            throw new Error('Missing VITE_FIREBASE_API_KEY or VITE_FIREBASE_PROJECT_ID');
+          }
+          await activateUserTagViaRest(currentUserId, registrationName.trim(), apiKey, projectId);
+          const local = users.find((u) => u.id === currentUserId) ?? INITIAL_USERS.find((u) => u.id === currentUserId);
+          if (local) {
+            setUsers((prev) => {
+              const next = prev.filter((u) => u.id !== currentUserId);
+              return [{ ...local, name: registrationName.trim() }, ...next];
+            });
+          }
+          setRegistrationName('');
+          setScanResult({ type: 'success', message: 'Tag activated successfully.' });
+        } catch (fallbackError) {
+          setScanResult({ type: 'error', message: getDbErrorMessage(fallbackError) });
+        }
+      } else {
+        setScanResult({ type: 'error', message: getDbErrorMessage(error) });
+      }
+    } finally {
+      setIsActivatingTag(false);
     }
   };
 
@@ -340,10 +379,10 @@ const App: React.FC = () => {
               
               <button 
                 onClick={handleRegister}
-                disabled={!registrationName.trim()}
+                disabled={!registrationName.trim() || isActivatingTag}
                 className="w-full py-6 rounded-2xl bg-primary text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-primary/30 disabled:opacity-30 active:scale-95 transition-all"
               >
-                Activate Tag
+                {isActivatingTag ? 'Activating...' : 'Activate Tag'}
               </button>
            </div>
         </div>
