@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, ScanLog, LedgerEntry } from './types';
 import {
   initializeUsers,
+  activateUserTag,
   saveUsers,
   subscribeToUsers,
   subscribeToScanLogs,
@@ -114,12 +115,9 @@ const App: React.FC = () => {
   };
 
   const handleRegister = async () => {
-    if (!registrationName.trim() || !currentUser) return;
-    const updatedUsers = users.map(u =>
-      u.id === currentUserId ? { ...u, name: registrationName.trim() } : u
-    );
+    if (!registrationName.trim()) return;
     try {
-      await saveUsers(updatedUsers);
+      await activateUserTag(currentUserId, registrationName.trim());
       setRegistrationName('');
       setScanResult({ type: 'success', message: 'Tag activated successfully.' });
     } catch (error) {
@@ -342,7 +340,7 @@ const App: React.FC = () => {
               
               <button 
                 onClick={handleRegister}
-                disabled={!registrationName.trim() || !currentUser}
+                disabled={!registrationName.trim()}
                 className="w-full py-6 rounded-2xl bg-primary text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-primary/30 disabled:opacity-30 active:scale-95 transition-all"
               >
                 Activate Tag

@@ -5,6 +5,7 @@ import { db } from '../src/firebase/config';
 import { 
   collection, 
   doc, 
+  getDoc,
   getDocs, 
   setDoc, 
   addDoc,
@@ -49,6 +50,26 @@ export const saveUsers = async (users: User[]): Promise<void> => {
   for (const user of users) {
     await setDoc(doc(usersCollection, user.id), user);
   }
+};
+
+// Activate a user slot even if realtime state hasn't loaded yet.
+export const activateUserTag = async (userId: string, name: string): Promise<void> => {
+  const userRef = doc(usersCollection, userId);
+  const snapshot = await getDoc(userRef);
+  const initial = INITIAL_USERS.find((u) => u.id === userId);
+
+  const base: User = snapshot.exists()
+    ? (snapshot.data() as User)
+    : (initial ?? {
+        id: userId,
+        name: '',
+        code: '',
+        points: 1000,
+        violationHistory: [],
+        scanCount: 0,
+      });
+
+  await setDoc(userRef, { ...base, id: userId, name: name.trim() });
 };
 
 // Update a single user in Firestore
