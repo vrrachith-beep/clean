@@ -1,7 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ScanLog, LedgerEntry } from './types';
-import { getStoredUsers, saveUsers, getScanLogs, saveScanLog, getLedgerEntries, saveLedgerEntry } from './services/db';
+import {
+  initializeUsers,
+  saveUsers,
+  subscribeToUsers,
+  subscribeToScanLogs,
+  subscribeToLedger,
+  applyViolationTransaction,
+} from './services/db';
 import { Leaderboard } from './components/Leaderboard';
 import { Analytics } from './components/Analytics';
 import { Badges } from './components/Badges';
@@ -34,17 +41,24 @@ const App: React.FC = () => {
     .reduce((sum, entry) => sum + entry.amount, 0);
 
   useEffect(() => {
-    const loadData = async () => {
-      const [loadedUsers, loadedLogs, loadedLedger] = await Promise.all([
-        getStoredUsers(),
-        getScanLogs(),
-        getLedgerEntries(),
-      ]);
-      setUsers(loadedUsers);
-      setLogs(loadedLogs);
-      setLedgerEntries(loadedLedger);
+    let unsubUsers: (() => void) | undefined;
+    let unsubLogs: (() => void) | undefined;
+    let unsubLedger: (() => void) | undefined;
+
+    const setupRealtime = async () => {
+      await initializeUsers();
+      unsubUsers = subscribeToUsers(setUsers);
+      unsubLogs = subscribeToScanLogs(setLogs);
+      unsubLedger = subscribeToLedger(setLedgerEntries);
     };
-    loadData();
+
+    setupRealtime();
+
+    return () => {
+      unsubUsers?.();
+      unsubLogs?.();
+      unsubLedger?.();
+    };
   }, []);
 
   const buildQrPayload = (user: User): string => {
@@ -204,66 +218,15 @@ const App: React.FC = () => {
     const bonus = wasteType ? SORTING_BONUS : 0;
     const totalReward = REWARD_POINTS + bonus;
 
-    const updatedUsers = users.map(user => {
-      if (user.id === littererId) {
-        return { 
-          ...user, 
-          points: Math.max(0, user.points - PENALTY_POINTS),
-          violationHistory: [...user.violationHistory, `${wasteType || 'Trash'} left at ${new Date().toLocaleTimeString()}`]
-        };
-      }
-      if (user.id === currentUser.id) {
-        return { 
-          ...user, 
-          points: user.points + totalReward,
-          scanCount: (user.scanCount || 0) + 1
-        };
-      }
-      return user;
-    });
-
-    setUsers(updatedUsers);
-    await saveUsers(updatedUsers);
-    
-    const newLog = {
-      timestamp: new Date().toISOString(),
+    await applyViolationTransaction({
       scannerId: currentUser.id,
-      littererId: littererId,
+      littererId,
       wasteType,
+      description,
       rewardPoints: totalReward,
       penaltyPoints: PENALTY_POINTS,
-      scannedValue
-    };
-    await saveScanLog(newLog);
-    setLogs(prev => [...prev, newLog]);
-
-    const creditEntry: LedgerEntry = {
-      id: `credit-${Date.now()}-${currentUser.id}`,
-      timestamp: new Date().toISOString(),
-      userId: currentUser.id,
-      type: 'credit',
-      amount: totalReward,
-      reason: description || 'Valid litter report',
-      counterpartyId: littererId,
-      wasteType,
-    };
-
-    const debitEntry: LedgerEntry = {
-      id: `debit-${Date.now()}-${littererId}`,
-      timestamp: new Date().toISOString(),
-      userId: littererId,
-      type: 'debit',
-      amount: PENALTY_POINTS,
-      reason: description || 'Littering violation penalty',
-      counterpartyId: currentUser.id,
-      wasteType,
-    };
-
-    await Promise.all([
-      saveLedgerEntry(creditEntry),
-      saveLedgerEntry(debitEntry),
-    ]);
-    setLedgerEntries((prev) => [creditEntry, debitEntry, ...prev]);
+      scannedValue,
+    });
 
     const litterer = users.find(u => u.id === littererId);
     setScanResult({

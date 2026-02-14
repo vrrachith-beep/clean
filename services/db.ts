@@ -11,7 +11,8 @@ import {
   onSnapshot,
   query,
   orderBy,
-  Timestamp 
+  Timestamp,
+  runTransaction
 } from 'firebase/firestore';
 
 // Collection references
@@ -75,6 +76,101 @@ export const getLedgerEntries = async (): Promise<LedgerEntry[]> => {
 // Add a new ledger entry to Firestore
 export const saveLedgerEntry = async (entry: LedgerEntry): Promise<void> => {
   await addDoc(ledgerCollection, entry);
+};
+
+interface ViolationInput {
+  scannerId: string;
+  littererId: string;
+  wasteType: string;
+  description: string;
+  rewardPoints: number;
+  penaltyPoints: number;
+  scannedValue: string;
+}
+
+interface ViolationResult {
+  log: ScanLog;
+  creditEntry: LedgerEntry;
+  debitEntry: LedgerEntry;
+}
+
+// Apply a full violation in one transaction so online users stay consistent.
+export const applyViolationTransaction = async (input: ViolationInput): Promise<ViolationResult> => {
+  return runTransaction(db, async (tx) => {
+    const scannerRef = doc(usersCollection, input.scannerId);
+    const littererRef = doc(usersCollection, input.littererId);
+
+    const [scannerSnap, littererSnap] = await Promise.all([
+      tx.get(scannerRef),
+      tx.get(littererRef),
+    ]);
+
+    if (!scannerSnap.exists() || !littererSnap.exists()) {
+      throw new Error('Scanner or litterer not found');
+    }
+
+    const scanner = scannerSnap.data() as User;
+    const litterer = littererSnap.data() as User;
+    const nowIso = new Date().toISOString();
+
+    const scannerPoints = (scanner.points || 0) + input.rewardPoints;
+    const littererPoints = Math.max(0, (litterer.points || 0) - input.penaltyPoints);
+
+    tx.update(scannerRef, {
+      points: scannerPoints,
+      scanCount: (scanner.scanCount || 0) + 1,
+    });
+
+    tx.update(littererRef, {
+      points: littererPoints,
+      violationHistory: [
+        ...(litterer.violationHistory || []),
+        `${input.wasteType || 'Trash'} left at ${new Date().toLocaleTimeString()}`,
+      ],
+    });
+
+    const scanLogRef = doc(scanLogsCollection);
+    const creditRef = doc(ledgerCollection);
+    const debitRef = doc(ledgerCollection);
+
+    const log: ScanLog = {
+      timestamp: nowIso,
+      scannerId: input.scannerId,
+      littererId: input.littererId,
+      wasteType: input.wasteType,
+      rewardPoints: input.rewardPoints,
+      penaltyPoints: input.penaltyPoints,
+      scannedValue: input.scannedValue,
+    };
+
+    const creditEntry: LedgerEntry = {
+      id: creditRef.id,
+      timestamp: nowIso,
+      userId: input.scannerId,
+      type: 'credit',
+      amount: input.rewardPoints,
+      reason: input.description || 'Valid litter report',
+      counterpartyId: input.littererId,
+      wasteType: input.wasteType,
+    };
+
+    const debitEntry: LedgerEntry = {
+      id: debitRef.id,
+      timestamp: nowIso,
+      userId: input.littererId,
+      type: 'debit',
+      amount: input.penaltyPoints,
+      reason: input.description || 'Littering violation penalty',
+      counterpartyId: input.scannerId,
+      wasteType: input.wasteType,
+    };
+
+    tx.set(scanLogRef, log);
+    tx.set(creditRef, creditEntry);
+    tx.set(debitRef, debitEntry);
+
+    return { log, creditEntry, debitEntry };
+  });
 };
 
 // Subscribe to real-time updates for users
