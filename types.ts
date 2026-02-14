@@ -21,10 +21,25 @@ export interface ScanLog {
   scannerId: string;
   littererId: string;
   wasteType?: string;
+  rewardPoints?: number;
+  penaltyPoints?: number;
+  scannedValue?: string;
+}
+
+export interface LedgerEntry {
+  id: string;
+  timestamp: string;
+  userId: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  reason: string;
+  counterpartyId?: string;
+  wasteType?: string;
 }
 
 export interface AppState {
   currentUser: User | null;
   users: User[];
   scanLogs: ScanLog[];
+  ledgerEntries: LedgerEntry[];
 }

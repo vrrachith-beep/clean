@@ -1,5 +1,5 @@
 
-import { User, ScanLog } from '../types';
+import { User, ScanLog, LedgerEntry } from '../types';
 import { INITIAL_USERS } from '../constants';
 import { db } from '../src/firebase/config';
 import { 
@@ -17,6 +17,7 @@ import {
 // Collection references
 const usersCollection = collection(db, 'users');
 const scanLogsCollection = collection(db, 'scanLogs');
+const ledgerCollection = collection(db, 'ledger');
 
 // Initialize users in Firestore if empty
 export const initializeUsers = async (): Promise<void> => {
@@ -64,6 +65,18 @@ export const saveScanLog = async (log: ScanLog): Promise<void> => {
   await addDoc(scanLogsCollection, log);
 };
 
+// Get all ledger entries from Firestore (one-time fetch)
+export const getLedgerEntries = async (): Promise<LedgerEntry[]> => {
+  const q = query(ledgerCollection, orderBy('timestamp', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => doc.data() as LedgerEntry);
+};
+
+// Add a new ledger entry to Firestore
+export const saveLedgerEntry = async (entry: LedgerEntry): Promise<void> => {
+  await addDoc(ledgerCollection, entry);
+};
+
 // Subscribe to real-time updates for users
 export const subscribeToUsers = (callback: (users: User[]) => void): (() => void) => {
   return onSnapshot(usersCollection, (snapshot) => {
@@ -78,6 +91,15 @@ export const subscribeToScanLogs = (callback: (logs: ScanLog[]) => void): (() =>
   return onSnapshot(q, (snapshot) => {
     const logs = snapshot.docs.map(doc => doc.data() as ScanLog);
     callback(logs);
+  });
+};
+
+// Subscribe to real-time updates for ledger entries
+export const subscribeToLedger = (callback: (entries: LedgerEntry[]) => void): (() => void) => {
+  const q = query(ledgerCollection, orderBy('timestamp', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const entries = snapshot.docs.map(doc => doc.data() as LedgerEntry);
+    callback(entries);
   });
 };
 

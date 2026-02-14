@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, ScanLog } from './types';
-import { getStoredUsers, saveUsers, getScanLogs, saveScanLog } from './services/db';
+import { User, ScanLog, LedgerEntry } from './types';
+import { getStoredUsers, saveUsers, getScanLogs, saveScanLog, getLedgerEntries, saveLedgerEntry } from './services/db';
 import { Leaderboard } from './components/Leaderboard';
 import { Analytics } from './components/Analytics';
 import { Badges } from './components/Badges';
@@ -12,6 +12,7 @@ import { GoogleGenAI } from "@google/genai";
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<ScanLog[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('TAG_001');
   const [activeTab, setActiveTab] = useState<'home' | 'registry' | 'profile'>('home');
   const [isScanning, setIsScanning] = useState(false);
@@ -24,12 +25,59 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const currentUser = users.find(u => u.id === currentUserId) || null;
+  const currentUserLedger = ledgerEntries.filter((entry) => entry.userId === currentUserId);
+  const totalCredits = currentUserLedger
+    .filter((entry) => entry.type === 'credit')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const totalDebits = currentUserLedger
+    .filter((entry) => entry.type === 'debit')
+    .reduce((sum, entry) => sum + entry.amount, 0);
 
   useEffect(() => {
-    const loadedUsers = getStoredUsers();
-    setUsers(loadedUsers);
-    setLogs(getScanLogs());
+    const loadData = async () => {
+      const [loadedUsers, loadedLogs, loadedLedger] = await Promise.all([
+        getStoredUsers(),
+        getScanLogs(),
+        getLedgerEntries(),
+      ]);
+      setUsers(loadedUsers);
+      setLogs(loadedLogs);
+      setLedgerEntries(loadedLedger);
+    };
+    loadData();
   }, []);
+
+  const buildQrPayload = (user: User): string => {
+    return JSON.stringify({ userId: user.id, code: user.code });
+  };
+
+  const resolveUserFromScannedValue = (rawValue: string): User | undefined => {
+    const value = (rawValue || '').trim();
+    if (!value) return undefined;
+
+    const directCodeMatch = users.find((u) => u.code === value);
+    if (directCodeMatch) return directCodeMatch;
+
+    const directIdMatch = users.find((u) => u.id === value);
+    if (directIdMatch) return directIdMatch;
+
+    try {
+      const parsed = JSON.parse(value) as { userId?: string; code?: string };
+      if (parsed.userId && parsed.code) {
+        return users.find((u) => u.id === parsed.userId && u.code === parsed.code);
+      }
+      if (parsed.code) {
+        return users.find((u) => u.code === parsed.code);
+      }
+      if (parsed.userId) {
+        return users.find((u) => u.id === parsed.userId);
+      }
+    } catch {
+      return undefined;
+    }
+
+    return undefined;
+  };
 
   const handleRegister = () => {
     if (!registrationName.trim() || !currentUser) return;
@@ -100,8 +148,9 @@ const App: React.FC = () => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     try {
-      const prompt = `Vikasit Bharat Systems Architect Analysis: 
-      1. Scan the image for a Standard QR Code. Decode its content.
+      const prompt = `Vikasit Bharat Systems Architect Analysis:
+      1. Scan the image for a Standard QR Code. Decode its full content exactly.
+      2. The QR content may be raw 10-digit code OR a JSON string like {"userId":"TAG_001","code":"8472910384"}.
       2. If no QR found, look for a 10-digit numeric ID (e.g., 8472910384).
       3. Classify the trash (Plastic, Paper, Metal, Organic, Electronic).
       Respond with strict JSON.
@@ -124,15 +173,15 @@ const App: React.FC = () => {
       const result = JSON.parse(response.text || '{}');
 
       if (result.code && result.code !== 'NONE') {
-        const litterer = users.find(u => u.code === result.code);
+        const litterer = resolveUserFromScannedValue(result.code);
         if (litterer) {
           if (litterer.id === currentUser?.id) {
             setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
           } else {
-            handleViolation(litterer.id, result.description, result.wasteType);
+            handleViolation(litterer.id, result.description, result.wasteType, result.code);
           }
         } else {
-           setScanResult({ type: 'error', message: `ID Code ${result.code} is not recognized in the campus database.` });
+          setScanResult({ type: 'error', message: `ID Code ${result.code} is not recognized in the campus database.` });
         }
       } else {
         setScanResult({ type: 'error', message: "Optical clarity insufficient. Ensure the Identity QR is flat and centered." });
@@ -149,7 +198,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleViolation = (littererId: string, description: string, wasteType: string) => {
+  const handleViolation = async (littererId: string, description: string, wasteType: string, scannedValue: string) => {
     if (!currentUser) return;
 
     const bonus = wasteType ? SORTING_BONUS : 0;
@@ -174,16 +223,47 @@ const App: React.FC = () => {
     });
 
     setUsers(updatedUsers);
-    saveUsers(updatedUsers);
+    await saveUsers(updatedUsers);
     
     const newLog = {
       timestamp: new Date().toISOString(),
       scannerId: currentUser.id,
       littererId: littererId,
-      wasteType
+      wasteType,
+      rewardPoints: totalReward,
+      penaltyPoints: PENALTY_POINTS,
+      scannedValue
     };
-    saveScanLog(newLog);
+    await saveScanLog(newLog);
     setLogs(prev => [...prev, newLog]);
+
+    const creditEntry: LedgerEntry = {
+      id: `credit-${Date.now()}-${currentUser.id}`,
+      timestamp: new Date().toISOString(),
+      userId: currentUser.id,
+      type: 'credit',
+      amount: totalReward,
+      reason: description || 'Valid litter report',
+      counterpartyId: littererId,
+      wasteType,
+    };
+
+    const debitEntry: LedgerEntry = {
+      id: `debit-${Date.now()}-${littererId}`,
+      timestamp: new Date().toISOString(),
+      userId: littererId,
+      type: 'debit',
+      amount: PENALTY_POINTS,
+      reason: description || 'Littering violation penalty',
+      counterpartyId: currentUser.id,
+      wasteType,
+    };
+
+    await Promise.all([
+      saveLedgerEntry(creditEntry),
+      saveLedgerEntry(debitEntry),
+    ]);
+    setLedgerEntries((prev) => [creditEntry, debitEntry, ...prev]);
 
     const litterer = users.find(u => u.id === littererId);
     setScanResult({
@@ -323,7 +403,7 @@ const App: React.FC = () => {
                   
                   <div className="bg-white rounded-2xl p-4 w-48 h-48 mx-auto mb-8 shadow-2xl border-4 border-slate-900">
                     <img 
-                      src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${currentUser.code}`} 
+                      src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(buildQrPayload(currentUser))}`} 
                       alt="My QR"
                       className="w-full h-full"
                     />
@@ -338,6 +418,39 @@ const App: React.FC = () => {
                         <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Credits</p>
                         <p className="text-3xl font-black text-primary">{currentUser.points}</p>
                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mb-8">
+                    <div className="bg-slate-900/60 p-4 rounded-2xl border border-emerald-700/30">
+                      <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Total Credit</p>
+                      <p className="text-xl font-black text-primary">+{totalCredits}</p>
+                    </div>
+                    <div className="bg-slate-900/60 p-4 rounded-2xl border border-rose-700/30">
+                      <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">Total Debit</p>
+                      <p className="text-xl font-black text-danger">-{totalDebits}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 text-left">
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3">Recent Credit/Debit</p>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {currentUserLedger.slice(0, 8).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between bg-slate-950/60 rounded-xl px-3 py-2">
+                          <div>
+                            <p className="text-xs font-bold text-slate-200">{entry.reason}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {new Date(entry.timestamp).toLocaleString()}
+                            </p>
+                          </div>
+                          <p className={`text-sm font-black ${entry.type === 'credit' ? 'text-primary' : 'text-danger'}`}>
+                            {entry.type === 'credit' ? '+' : '-'}{entry.amount}
+                          </p>
+                        </div>
+                      ))}
+                      {currentUserLedger.length === 0 && (
+                        <p className="text-xs text-slate-500 text-center py-4">No transactions yet.</p>
+                      )}
+                    </div>
                   </div>
                </div>
             </div>

@@ -7,6 +7,10 @@ interface QRRegistryProps {
 }
 
 export const QRRegistry: React.FC<QRRegistryProps> = ({ users }) => {
+  const buildQrPayload = (user: User): string => {
+    return JSON.stringify({ userId: user.id, code: user.code });
+  };
+
   // Sorting: Registered students alphabetically, then unclaimed slots at the bottom
   const sortedUsers = [...users].sort((a, b) => {
     if (a.name === '' && b.name !== '') return 1;
@@ -42,7 +46,7 @@ export const QRRegistry: React.FC<QRRegistryProps> = ({ users }) => {
             {/* Real scannable QR Code using Google Charts API */}
             <div className={`relative w-full aspect-square bg-white rounded-2xl mb-4 flex items-center justify-center p-2 shadow-inner overflow-hidden ${!user.name && 'grayscale'}`}>
               <img 
-                src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${user.code}`} 
+                src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(buildQrPayload(user))}`} 
                 alt={`QR for ${user.code}`}
                 className="w-full h-full object-contain"
               />
