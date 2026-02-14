@@ -1,7 +1,7 @@
 
 import { User, ScanLog } from '../types';
 import { INITIAL_USERS } from '../constants';
-import { db } from '../firebase/config';
+import { db } from '../src/firebase/config';
 import { 
   collection, 
   doc, 
