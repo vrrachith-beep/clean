@@ -19,11 +19,13 @@ import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './c
 import { GoogleGenAI } from "@google/genai";
 import jsQR from 'jsqr';
 
+const USER_ID_STORAGE_KEY = 'cleancredit_current_user_id';
+
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<ScanLog[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string>('TAG_001');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'home' | 'registry' | 'profile'>('home');
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -49,6 +51,11 @@ const App: React.FC = () => {
   const totalDebits = currentUserLedger
     .filter((entry) => entry.type === 'debit')
     .reduce((sum, entry) => sum + entry.amount, 0);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(USER_ID_STORAGE_KEY);
+    if (stored) setCurrentUserId(stored);
+  }, []);
 
   useEffect(() => {
     let unsubUsers: (() => void) | undefined;
@@ -78,6 +85,15 @@ const App: React.FC = () => {
       unsubLedger?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId || users.length === 0) return;
+    const exists = users.some((u) => u.id === currentUserId);
+    if (!exists) {
+      setCurrentUserId(null);
+      localStorage.removeItem(USER_ID_STORAGE_KEY);
+    }
+  }, [users, currentUserId]);
 
   const getDbErrorMessage = (error: unknown): string => {
     const message = error instanceof Error ? error.message : String(error);
@@ -127,7 +143,7 @@ const App: React.FC = () => {
   };
 
   const handleRegister = async () => {
-    if (!registrationName.trim()) return;
+    if (!registrationName.trim() || !currentUserId) return;
     setIsActivatingTag(true);
     try {
       await activateUserTag(currentUserId, registrationName.trim());
@@ -371,6 +387,13 @@ const App: React.FC = () => {
   };
 
   const isRegistered = currentUser && currentUser.name !== '';
+  const availableUsers = users.filter((u) => !u.name);
+
+  const selectIdentity = (id: string) => {
+    setCurrentUserId(id);
+    localStorage.setItem(USER_ID_STORAGE_KEY, id);
+    setShowIdentityMenu(false);
+  };
 
   return (
     <div className="min-h-screen max-w-md mx-auto bg-dark text-slate-100 flex flex-col p-4 shadow-2xl pb-24 relative overflow-x-hidden">
@@ -407,7 +430,7 @@ const App: React.FC = () => {
             {users.map(u => (
               <button 
                 key={u.id}
-                onClick={() => { setCurrentUserId(u.id); setShowIdentityMenu(false); }}
+                onClick={() => selectIdentity(u.id)}
                 className={`w-full text-left p-4 rounded-2xl transition-all border ${currentUserId === u.id ? 'bg-primary/10 border-primary/40 text-primary' : 'bg-slate-900/60 border-slate-800/50 text-slate-300 hover:bg-slate-700'}`}
               >
                 <div className="flex justify-between items-center mb-1">
@@ -422,7 +445,34 @@ const App: React.FC = () => {
       )}
 
       {/* Main UI */}
-      {!isRegistered && activeTab !== 'registry' ? (
+      {!currentUserId && activeTab !== 'registry' ? (
+        <div className="flex-1 flex flex-col items-center justify-center animate-in zoom-in-95 duration-500 py-10">
+          <div className="bg-slate-800/40 p-8 rounded-[3rem] border border-slate-700 shadow-2xl text-center w-full backdrop-blur-sm">
+            <h2 className="text-3xl font-black mb-4 uppercase italic tracking-tighter">Choose Your Tag</h2>
+            <p className="text-sm text-slate-400 mb-8 leading-relaxed">
+              Pick any available ID slot, then activate with your name.
+            </p>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {availableUsers.length > 0 ? (
+                availableUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    onClick={() => selectIdentity(u.id)}
+                    className="w-full text-left p-4 rounded-2xl bg-slate-900/60 border border-slate-800/50 text-slate-300 hover:bg-slate-700 transition-all"
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-black">{u.id}</span>
+                      <span className="text-[10px] font-mono text-slate-500">{u.code}</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-sm text-slate-400">No unclaimed tags left. Ask admin to add more slots.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : !isRegistered && activeTab !== 'registry' ? (
         <div className="flex-1 flex flex-col items-center justify-center animate-in zoom-in-95 duration-500 py-10">
            <div className="bg-slate-800/40 p-10 rounded-[3rem] border border-slate-700 shadow-2xl text-center w-full backdrop-blur-sm">
               <div className="w-24 h-24 rounded-3xl bg-primary/20 flex items-center justify-center text-5xl mx-auto mb-8 shadow-inner border border-primary/20">📝</div>
