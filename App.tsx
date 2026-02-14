@@ -27,6 +27,12 @@ const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanResult, setScanResult] = useState<{ type: 'success' | 'error' | 'info'; message: string; data?: any } | null>(null);
+  const [pendingViolation, setPendingViolation] = useState<{
+    littererId: string;
+    scannedValue: string;
+    description: string;
+    wasteType: string;
+  } | null>(null);
   const [showIdentityMenu, setShowIdentityMenu] = useState(false);
   const [registrationName, setRegistrationName] = useState('');
   const [isActivatingTag, setIsActivatingTag] = useState(false);
@@ -225,7 +231,12 @@ const App: React.FC = () => {
           setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
           return;
         }
-        await handleViolation(litterer.id, 'Direct QR detection', '', directCode);
+        setPendingViolation({
+          littererId: litterer.id,
+          scannedValue: directCode,
+          description: 'Direct QR detection',
+          wasteType: '',
+        });
         return;
       }
       setScanResult({ type: 'error', message: `ID Code ${directCode} is not recognized in the campus database.` });
@@ -329,6 +340,17 @@ const App: React.FC = () => {
       message: `SHAME & FAME!\nLitterer: ${litterer?.name || 'Student'}\nClass: ${wasteType}\nCredits: +${totalReward} PTS`,
       data: { litterer, bonus }
     });
+  };
+
+  const confirmPendingViolation = async () => {
+    if (!pendingViolation) return;
+    await handleViolation(
+      pendingViolation.littererId,
+      pendingViolation.description,
+      pendingViolation.wasteType,
+      pendingViolation.scannedValue,
+    );
+    setPendingViolation(null);
   };
 
   const copyAppLink = () => {
@@ -587,6 +609,36 @@ const App: React.FC = () => {
               >
                 CLOSE
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingViolation && (
+        <div className="fixed inset-0 z-[111] flex items-center justify-center p-8 bg-dark/95 backdrop-blur-3xl animate-in zoom-in-95 duration-300">
+          <div className="w-full max-sm p-10 rounded-[3rem] border-4 border-secondary bg-secondary/5 shadow-[0_0_100px_rgba(0,0,0,0.9)]">
+            <div className="text-center">
+              <div className="text-7xl mb-6">🧾</div>
+              <h2 className="text-3xl font-black mb-4 uppercase italic tracking-tighter text-secondary">
+                Confirm Report
+              </h2>
+              <p className="text-lg font-black leading-tight mb-8 text-slate-100 whitespace-pre-line">
+                {`Scanned ID: ${pendingViolation.scannedValue}\nApply credit/debit now?`}
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={() => setPendingViolation(null)}
+                  className="py-4 rounded-2xl font-black uppercase tracking-[0.2em] bg-slate-700 text-white active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmPendingViolation}
+                  className="py-4 rounded-2xl font-black uppercase tracking-[0.2em] bg-primary text-white active:scale-95 transition-all"
+                >
+                  Confirm
+                </button>
+              </div>
             </div>
           </div>
         </div>
