@@ -46,10 +46,18 @@ const App: React.FC = () => {
     let unsubLedger: (() => void) | undefined;
 
     const setupRealtime = async () => {
-      await initializeUsers();
-      unsubUsers = subscribeToUsers(setUsers);
-      unsubLogs = subscribeToScanLogs(setLogs);
-      unsubLedger = subscribeToLedger(setLedgerEntries);
+      try {
+        await initializeUsers();
+        unsubUsers = subscribeToUsers(setUsers);
+        unsubLogs = subscribeToScanLogs(setLogs);
+        unsubLedger = subscribeToLedger(setLedgerEntries);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setScanResult({
+          type: 'error',
+          message: `Realtime setup failed: ${message}. Check Firebase config and Firestore rules.`,
+        });
+      }
     };
 
     setupRealtime();
@@ -60,6 +68,18 @@ const App: React.FC = () => {
       unsubLedger?.();
     };
   }, []);
+
+  const getDbErrorMessage = (error: unknown): string => {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    if (lower.includes('permission-denied')) {
+      return 'Tag activation failed: Firestore permission denied. Update your Firestore rules.';
+    }
+    if (lower.includes('project') || lower.includes('api key') || lower.includes('auth')) {
+      return 'Tag activation failed: Firebase config is missing/invalid. Set VITE_FIREBASE_* environment values.';
+    }
+    return `Tag activation failed: ${message}`;
+  };
 
   const buildQrPayload = (user: User): string => {
     return JSON.stringify({ userId: user.id, code: user.code });
@@ -93,23 +113,30 @@ const App: React.FC = () => {
     return undefined;
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!registrationName.trim() || !currentUser) return;
-    const updatedUsers = users.map(u => 
+    const updatedUsers = users.map(u =>
       u.id === currentUserId ? { ...u, name: registrationName.trim() } : u
     );
-    setUsers(updatedUsers);
-    saveUsers(updatedUsers);
-    setRegistrationName('');
+    try {
+      await saveUsers(updatedUsers);
+      setRegistrationName('');
+      setScanResult({ type: 'success', message: 'Tag activated successfully.' });
+    } catch (error) {
+      setScanResult({ type: 'error', message: getDbErrorMessage(error) });
+    }
   };
 
-  const updateUserName = (newName: string) => {
+  const updateUserName = async (newName: string) => {
     if (!currentUser) return;
-    const updatedUsers = users.map(u => 
+    const updatedUsers = users.map(u =>
       u.id === currentUserId ? { ...u, name: newName } : u
     );
-    setUsers(updatedUsers);
-    saveUsers(updatedUsers);
+    try {
+      await saveUsers(updatedUsers);
+    } catch (error) {
+      setScanResult({ type: 'error', message: getDbErrorMessage(error) });
+    }
   };
 
   const startCamera = () => {
@@ -315,7 +342,7 @@ const App: React.FC = () => {
               
               <button 
                 onClick={handleRegister}
-                disabled={!registrationName.trim()}
+                disabled={!registrationName.trim() || !currentUser}
                 className="w-full py-6 rounded-2xl bg-primary text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-primary/30 disabled:opacity-30 active:scale-95 transition-all"
               >
                 Activate Tag
