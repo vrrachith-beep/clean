@@ -214,12 +214,43 @@ const App: React.FC = () => {
     if (!ctx) return;
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = canvas.toDataURL('image/jpeg');
-    
+    const directCode = await detectQrFromCanvas(canvas);
     stopCamera();
+
+    // Prefer native barcode detection for reliability and speed.
+    if (directCode) {
+      const litterer = resolveUserFromScannedValue(directCode);
+      if (litterer) {
+        if (litterer.id === currentUser.id) {
+          setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
+          return;
+        }
+        await handleViolation(litterer.id, 'Direct QR detection', '', directCode);
+        return;
+      }
+      setScanResult({ type: 'error', message: `ID Code ${directCode} is not recognized in the campus database.` });
+      return;
+    }
+
+    const imageData = canvas.toDataURL('image/jpeg');
+
     setIsAnalyzing(true);
     await processScan(imageData);
     setIsAnalyzing(false);
+  };
+
+  const detectQrFromCanvas = async (canvas: HTMLCanvasElement): Promise<string | null> => {
+    const AnyWindow = window as any;
+    if (!AnyWindow.BarcodeDetector) return null;
+    try {
+      const detector = new AnyWindow.BarcodeDetector({ formats: ['qr_code'] });
+      const barcodes = await detector.detect(canvas);
+      const value = barcodes?.[0]?.rawValue;
+      return value ? String(value) : null;
+    } catch (error) {
+      console.warn('BarcodeDetector failed, falling back to AI scan.', error);
+      return null;
+    }
   };
 
   const processScan = async (base64Image: string) => {
@@ -269,7 +300,7 @@ const App: React.FC = () => {
       const otherUsers = users.filter(u => u.id !== currentUser?.id && u.name !== '');
       if (otherUsers.length > 0 && Math.random() > 0.4) {
         const fallbackUser = otherUsers[Math.floor(Math.random() * otherUsers.length)];
-        handleViolation(fallbackUser.id, "Simulation: High-confidence neural detection", "Paper");
+        handleViolation(fallbackUser.id, "Simulation: High-confidence neural detection", "Paper", "SIMULATED");
       } else {
         setScanResult({ type: 'error', message: "Detection timed out. Check lighting and try again." });
       }
