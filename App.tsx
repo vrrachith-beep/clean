@@ -16,8 +16,7 @@ import { Analytics } from './components/Analytics';
 import { Badges } from './components/Badges';
 import { QRRegistry } from './components/QRRegistry';
 import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './constants';
-import { GoogleGenAI } from "@google/genai";
-import jsQR from 'jsqr';
+import { Html5Qrcode } from 'html5-qrcode';
 
 const USER_ID_STORAGE_KEY = 'cleancredit_current_user_id';
 
@@ -28,7 +27,6 @@ const App: React.FC = () => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'home' | 'registry' | 'profile'>('home');
   const [isScanning, setIsScanning] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanResult, setScanResult] = useState<{ type: 'success' | 'error' | 'info'; message: string; data?: any } | null>(null);
   const [pendingViolation, setPendingViolation] = useState<{
     littererId: string;
@@ -40,11 +38,8 @@ const App: React.FC = () => {
   const [registrationName, setRegistrationName] = useState('');
   const [isActivatingTag, setIsActivatingTag] = useState(false);
   const [manualScanCode, setManualScanCode] = useState('');
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const liveScanTimeoutRef = useRef<number | null>(null);
-  const isLiveDecodingRef = useRef(false);
+  const html5QrRef = useRef<Html5Qrcode | null>(null);
+  const scanHandledRef = useRef(false);
 
   const currentUser = users.find(u => u.id === currentUserId) || null;
   const currentUserLedger = ledgerEntries.filter((entry) => entry.userId === currentUserId);
@@ -213,150 +208,10 @@ const App: React.FC = () => {
     setIsScanning(true);
     setScanResult(null);
     setManualScanCode('');
-    setTimeout(async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            startLiveQrScanLoop();
-          };
-        }
-      } catch (err) {
-        console.error("Camera error:", err);
-        setScanResult({ type: 'error', message: 'Could not access camera. Please check permissions.' });
-        setIsScanning(false);
-      }
-    }, 100);
   };
 
   const stopCamera = () => {
-    if (liveScanTimeoutRef.current) {
-      clearTimeout(liveScanTimeoutRef.current);
-      liveScanTimeoutRef.current = null;
-    }
-    isLiveDecodingRef.current = false;
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach(track => track.stop());
-    }
     setIsScanning(false);
-  };
-
-  const startLiveQrScanLoop = () => {
-    const loop = async () => {
-      if (!isScanning) return;
-      if (isLiveDecodingRef.current) {
-        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
-        return;
-      }
-      if (!videoRef.current || !canvasRef.current) {
-        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
-        return;
-      }
-      if (videoRef.current.readyState < 2) {
-        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
-        return;
-      }
-
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
-        return;
-      }
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      isLiveDecodingRef.current = true;
-      const code = await detectQrFromCanvas(canvas, ctx);
-      isLiveDecodingRef.current = false;
-
-      if (code) {
-        stopCamera();
-        queueViolationFromScan(code, 'Live camera QR detection', '');
-        return;
-      }
-
-      liveScanTimeoutRef.current = window.setTimeout(loop, 300);
-    };
-
-    if (liveScanTimeoutRef.current) {
-      clearTimeout(liveScanTimeoutRef.current);
-    }
-    liveScanTimeoutRef.current = window.setTimeout(loop, 200);
-  };
-
-  const handleCapture = async () => {
-    if (!videoRef.current || !canvasRef.current || !currentUser) return;
-
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const directCode = await detectQrFromCanvas(canvas, ctx);
-    stopCamera();
-
-    // Prefer native barcode detection for reliability and speed.
-    if (directCode) {
-      queueViolationFromScan(directCode, 'Direct QR detection', '');
-      return;
-    }
-
-    const imageData = canvas.toDataURL('image/jpeg');
-
-    setIsAnalyzing(true);
-    await processScan(imageData);
-    setIsAnalyzing(false);
-  };
-
-  const detectQrFromCanvas = async (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): Promise<string | null> => {
-    // Try jsQR first because it works across browsers without BarcodeDetector support.
-    try {
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const decoded = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
-      if (decoded?.data) return decoded.data;
-
-      // Second pass: binarize image to improve decode reliability on low light / glare.
-      const bin = new Uint8ClampedArray(frame.data);
-      for (let i = 0; i < bin.length; i += 4) {
-        const gray = (bin[i] * 0.299) + (bin[i + 1] * 0.587) + (bin[i + 2] * 0.114);
-        const v = gray > 130 ? 255 : 0;
-        bin[i] = v;
-        bin[i + 1] = v;
-        bin[i + 2] = v;
-      }
-      const decodedBin = jsQR(bin, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
-      if (decodedBin?.data) return decodedBin.data;
-    } catch (error) {
-      console.warn('jsQR failed, trying BarcodeDetector fallback.', error);
-    }
-
-    const AnyWindow = window as any;
-    if (!AnyWindow.BarcodeDetector) return null;
-    try {
-      const detector = new AnyWindow.BarcodeDetector({ formats: ['qr_code'] });
-      // Try both canvas and direct video element for broader browser compatibility.
-      const fromCanvas = await detector.detect(canvas);
-      let value = fromCanvas?.[0]?.rawValue;
-      if (!value && videoRef.current) {
-        const fromVideo = await detector.detect(videoRef.current);
-        value = fromVideo?.[0]?.rawValue;
-      }
-      return value ? String(value) : null;
-    } catch (error) {
-      console.warn('BarcodeDetector failed, falling back to AI scan.', error);
-      return null;
-    }
   };
 
   const queueViolationFromScan = (scannedValue: string, description: string, wasteType: string) => {
@@ -386,50 +241,72 @@ const App: React.FC = () => {
     setManualScanCode('');
   };
 
-  const processScan = async (base64Image: string) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    try {
-      const prompt = `Vikasit Bharat Systems Architect Analysis:
-      1. Scan the image for a Standard QR Code. Decode its full content exactly.
-      2. The QR content may be raw 10-digit code OR a JSON string like {"userId":"TAG_001","code":"8472910384"}.
-      2. If no QR found, look for a 10-digit numeric ID (e.g., 8472910384).
-      3. Classify the trash (Plastic, Paper, Metal, Organic, Electronic).
-      Respond with strict JSON.
-      JSON Schema: { "code": string | "NONE", "wasteType": string, "description": string }`;
-
-      const base64Data = base64Image.split(',')[1];
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-            { text: prompt }
-          ]
-        },
-        config: { 
-          responseMimeType: "application/json"
-        }
-      });
-
-      const result = JSON.parse(response.text || '{}');
-
-      if (result.code && result.code !== 'NONE') {
-        queueViolationFromScan(result.code, result.description || 'AI detection', result.wasteType || '');
-      } else {
-        setScanResult({ type: 'error', message: "Optical clarity insufficient. Ensure the Identity QR is flat and centered." });
+  useEffect(() => {
+    if (!isScanning) {
+      const existing = html5QrRef.current;
+      if (existing) {
+        existing.stop().catch(() => {}).finally(() => {
+          existing.clear().catch(() => {});
+        });
+        html5QrRef.current = null;
       }
-    } catch (err) {
-      console.error("AI Analysis Failed:", err);
-      const otherUsers = users.filter(u => u.id !== currentUser?.id && u.name !== '');
-      if (otherUsers.length > 0 && Math.random() > 0.4) {
-        const fallbackUser = otherUsers[Math.floor(Math.random() * otherUsers.length)];
-        handleViolation(fallbackUser.id, "Simulation: High-confidence neural detection", "Paper", "SIMULATED");
-      } else {
-        setScanResult({ type: 'error', message: "Detection timed out. Check lighting and try again." });
-      }
+      return;
     }
-  };
+
+    let cancelled = false;
+    scanHandledRef.current = false;
+
+    const startScanner = async () => {
+      try {
+        const scanner = new Html5Qrcode('qr-reader', { verbose: false });
+        html5QrRef.current = scanner;
+        try {
+          await scanner.start(
+            { facingMode: { exact: 'environment' } },
+            { fps: 10, qrbox: { width: 260, height: 260 } },
+            (decodedText) => {
+              if (scanHandledRef.current || cancelled) return;
+              scanHandledRef.current = true;
+              stopCamera();
+              queueViolationFromScan(decodedText, 'Live camera QR detection', '');
+            },
+            () => {}
+          );
+        } catch {
+          await scanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 260, height: 260 } },
+            (decodedText) => {
+              if (scanHandledRef.current || cancelled) return;
+              scanHandledRef.current = true;
+              stopCamera();
+              queueViolationFromScan(decodedText, 'Live camera QR detection', '');
+            },
+            () => {}
+          );
+        }
+      } catch (error) {
+        console.error('Scanner init failed:', error);
+        setScanResult({ type: 'error', message: 'Scanner failed to start. Use fallback code input below.' });
+        setIsScanning(false);
+      }
+    };
+
+    // Delay slightly so overlay container exists in DOM.
+    const t = window.setTimeout(startScanner, 100);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      const scanner = html5QrRef.current;
+      if (scanner) {
+        scanner.stop().catch(() => {}).finally(() => {
+          scanner.clear().catch(() => {});
+        });
+        html5QrRef.current = null;
+      }
+    };
+  }, [isScanning]);
 
   const handleViolation = async (littererId: string, description: string, wasteType: string, scannedValue: string) => {
     if (!currentUser) return;
@@ -685,49 +562,23 @@ const App: React.FC = () => {
         </>
       )}
 
-      {/* Scanning Overlays */}
-      {isAnalyzing && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-dark/95 backdrop-blur-2xl">
-          <div className="relative w-36 h-36 mb-10">
-            <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <div className="absolute inset-0 flex items-center justify-center text-6xl">🤖</div>
-          </div>
-          <h2 className="text-2xl font-black text-white animate-pulse uppercase tracking-[0.3em] italic">Vikasit AI</h2>
-          <p className="text-primary text-sm font-black mt-4 uppercase tracking-[0.2em]">Extracting QR Signature...</p>
-        </div>
-      )}
-
+      {/* Scanning Overlay */}
       {isScanning && (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col animate-in fade-in duration-500">
           <div className="p-8 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent">
             <div>
               <h3 className="font-black text-primary uppercase text-sm tracking-[0.3em]">Scanner Active</h3>
-              <p className="text-[10px] text-slate-400 uppercase font-bold mt-1">Focus on Identity Tag</p>
+              <p className="text-[10px] text-slate-400 uppercase font-bold mt-1">Align QR inside frame</p>
             </div>
             <button onClick={stopCamera} className="bg-white/10 p-5 rounded-full backdrop-blur-lg">
               <span className="text-xs font-black text-white">CANCEL</span>
             </button>
           </div>
-          <div className="flex-1 relative flex items-center justify-center">
-            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="w-80 h-80 border-4 border-white/10 rounded-[4rem] relative">
-                <div className="absolute top-0 left-0 w-20 h-20 border-t-[10px] border-l-[10px] border-primary rounded-tl-[4rem]"></div>
-                <div className="absolute bottom-0 right-0 w-20 h-20 border-b-[10px] border-r-[10px] border-primary rounded-br-[4rem]"></div>
-                <div className="absolute top-0 left-10 right-10 h-2 bg-gradient-to-r from-transparent via-primary to-transparent animate-scan shadow-[0_0_40px_#10b981]"></div>
-              </div>
-            </div>
+          <div className="flex-1 relative p-4">
+            <div id="qr-reader" className="w-full h-full rounded-3xl overflow-hidden border-2 border-primary/40" />
           </div>
-          <div className="p-16 flex justify-center bg-gradient-to-t from-black/90 to-transparent">
+          <div className="p-6 flex justify-center bg-gradient-to-t from-black/90 to-transparent">
             <div className="w-full max-w-sm space-y-4">
-              <div className="flex justify-center">
-                <button 
-                  onClick={handleCapture}
-                  className="w-28 h-28 rounded-full border-[10px] border-white/20 bg-primary shadow-[0_0_60px_rgba(16,185,129,0.7)] active:scale-75 transition-all flex items-center justify-center"
-                >
-                  <div className="w-12 h-12 rounded-full border-4 border-white/40"></div>
-                </button>
-              </div>
               <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl p-3 space-y-2">
                 <p className="text-[10px] text-slate-300 uppercase tracking-[0.2em] font-bold">Fallback: Paste QR/ID</p>
                 <input
@@ -746,7 +597,6 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
-          <canvas ref={canvasRef} className="hidden" />
         </div>
       )}
 
