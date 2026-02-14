@@ -17,6 +17,7 @@ import { Badges } from './components/Badges';
 import { QRRegistry } from './components/QRRegistry';
 import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './constants';
 import { GoogleGenAI } from "@google/genai";
+import jsQR from 'jsqr';
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -220,7 +221,7 @@ const App: React.FC = () => {
     if (!ctx) return;
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const directCode = await detectQrFromCanvas(canvas);
+    const directCode = await detectQrFromCanvas(canvas, ctx);
     stopCamera();
 
     // Prefer native barcode detection for reliability and speed.
@@ -250,7 +251,16 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
   };
 
-  const detectQrFromCanvas = async (canvas: HTMLCanvasElement): Promise<string | null> => {
+  const detectQrFromCanvas = async (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): Promise<string | null> => {
+    // Try jsQR first because it works across browsers without BarcodeDetector support.
+    try {
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const decoded = jsQR(frame.data, frame.width, frame.height);
+      if (decoded?.data) return decoded.data;
+    } catch (error) {
+      console.warn('jsQR failed, trying BarcodeDetector fallback.', error);
+    }
+
     const AnyWindow = window as any;
     if (!AnyWindow.BarcodeDetector) return null;
     try {
