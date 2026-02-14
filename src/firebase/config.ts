@@ -2,12 +2,12 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAgbYHzJ9obOAH175h9Oabz8ub4q4NJX2U',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'cleancredit-live.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'cleancredit-live',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'cleancredit-live.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '962355896597',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:962355896597:web:cc878b47d66e9a4890091c'
 };
 
 const missingFirebaseEnv = Object.entries(firebaseConfig)
@@ -16,8 +16,7 @@ const missingFirebaseEnv = Object.entries(firebaseConfig)
 
 if (missingFirebaseEnv.length > 0) {
   throw new Error(
-    `Missing Firebase env vars: ${missingFirebaseEnv.join(', ')}. ` +
-      'Set VITE_FIREBASE_* GitHub secrets and redeploy.',
+    `Missing Firebase config: ${missingFirebaseEnv.join(', ')}.`,
   );
 }
 
