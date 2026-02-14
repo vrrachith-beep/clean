@@ -43,6 +43,8 @@ const App: React.FC = () => {
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const liveScanTimeoutRef = useRef<number | null>(null);
+  const isLiveDecodingRef = useRef(false);
 
   const currentUser = users.find(u => u.id === currentUserId) || null;
   const currentUserLedger = ledgerEntries.filter((entry) => entry.userId === currentUserId);
@@ -117,16 +119,23 @@ const App: React.FC = () => {
 
   const resolveUserFromScannedValue = (rawValue: string): User | undefined => {
     const value = (rawValue || '').trim();
+    let normalized = value;
+    try {
+      normalized = decodeURIComponent(value);
+    } catch {
+      normalized = value;
+    }
+
     if (!value) return undefined;
 
-    const directCodeMatch = users.find((u) => u.code === value);
+    const directCodeMatch = users.find((u) => u.code === normalized);
     if (directCodeMatch) return directCodeMatch;
 
-    const directIdMatch = users.find((u) => u.id === value);
+    const directIdMatch = users.find((u) => u.id === normalized);
     if (directIdMatch) return directIdMatch;
 
     try {
-      const parsed = JSON.parse(value) as { userId?: string; code?: string };
+      const parsed = JSON.parse(normalized) as { userId?: string; code?: string };
       if (parsed.userId && parsed.code) {
         return users.find((u) => u.id === parsed.userId && u.code === parsed.code);
       }
@@ -211,6 +220,9 @@ const App: React.FC = () => {
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+            startLiveQrScanLoop();
+          };
         }
       } catch (err) {
         console.error("Camera error:", err);
@@ -221,11 +233,63 @@ const App: React.FC = () => {
   };
 
   const stopCamera = () => {
+    if (liveScanTimeoutRef.current) {
+      clearTimeout(liveScanTimeoutRef.current);
+      liveScanTimeoutRef.current = null;
+    }
+    isLiveDecodingRef.current = false;
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach(track => track.stop());
     }
     setIsScanning(false);
+  };
+
+  const startLiveQrScanLoop = () => {
+    const loop = async () => {
+      if (!isScanning) return;
+      if (isLiveDecodingRef.current) {
+        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
+        return;
+      }
+      if (!videoRef.current || !canvasRef.current) {
+        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
+        return;
+      }
+      if (videoRef.current.readyState < 2) {
+        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
+        return;
+      }
+
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        liveScanTimeoutRef.current = window.setTimeout(loop, 300);
+        return;
+      }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      isLiveDecodingRef.current = true;
+      const code = await detectQrFromCanvas(canvas, ctx);
+      isLiveDecodingRef.current = false;
+
+      if (code) {
+        stopCamera();
+        queueViolationFromScan(code, 'Live camera QR detection', '');
+        return;
+      }
+
+      liveScanTimeoutRef.current = window.setTimeout(loop, 300);
+    };
+
+    if (liveScanTimeoutRef.current) {
+      clearTimeout(liveScanTimeoutRef.current);
+    }
+    liveScanTimeoutRef.current = window.setTimeout(loop, 200);
   };
 
   const handleCapture = async () => {
