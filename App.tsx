@@ -39,6 +39,7 @@ const App: React.FC = () => {
   const [showIdentityMenu, setShowIdentityMenu] = useState(false);
   const [registrationName, setRegistrationName] = useState('');
   const [isActivatingTag, setIsActivatingTag] = useState(false);
+  const [manualScanCode, setManualScanCode] = useState('');
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -202,6 +203,7 @@ const App: React.FC = () => {
   const startCamera = () => {
     setIsScanning(true);
     setScanResult(null);
+    setManualScanCode('');
     setTimeout(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -242,21 +244,7 @@ const App: React.FC = () => {
 
     // Prefer native barcode detection for reliability and speed.
     if (directCode) {
-      const litterer = resolveUserFromScannedValue(directCode);
-      if (litterer) {
-        if (litterer.id === currentUser.id) {
-          setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
-          return;
-        }
-        setPendingViolation({
-          littererId: litterer.id,
-          scannedValue: directCode,
-          description: 'Direct QR detection',
-          wasteType: '',
-        });
-        return;
-      }
-      setScanResult({ type: 'error', message: `ID Code ${directCode} is not recognized in the campus database.` });
+      queueViolationFromScan(directCode, 'Direct QR detection', '');
       return;
     }
 
@@ -290,6 +278,33 @@ const App: React.FC = () => {
     }
   };
 
+  const queueViolationFromScan = (scannedValue: string, description: string, wasteType: string) => {
+    if (!currentUser) return;
+    const litterer = resolveUserFromScannedValue(scannedValue);
+    if (!litterer) {
+      setScanResult({ type: 'error', message: `ID Code ${scannedValue} is not recognized in the campus database.` });
+      return;
+    }
+    if (litterer.id === currentUser.id) {
+      setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
+      return;
+    }
+    setPendingViolation({
+      littererId: litterer.id,
+      scannedValue,
+      description,
+      wasteType,
+    });
+  };
+
+  const handleManualScanSubmit = () => {
+    const value = manualScanCode.trim();
+    if (!value) return;
+    stopCamera();
+    queueViolationFromScan(value, 'Manual scan input', '');
+    setManualScanCode('');
+  };
+
   const processScan = async (base64Image: string) => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
@@ -319,16 +334,7 @@ const App: React.FC = () => {
       const result = JSON.parse(response.text || '{}');
 
       if (result.code && result.code !== 'NONE') {
-        const litterer = resolveUserFromScannedValue(result.code);
-        if (litterer) {
-          if (litterer.id === currentUser?.id) {
-            setScanResult({ type: 'error', message: "Accountability Paradox: You cannot report your own pre-assigned tag." });
-          } else {
-            handleViolation(litterer.id, result.description, result.wasteType, result.code);
-          }
-        } else {
-          setScanResult({ type: 'error', message: `ID Code ${result.code} is not recognized in the campus database.` });
-        }
+        queueViolationFromScan(result.code, result.description || 'AI detection', result.wasteType || '');
       } else {
         setScanResult({ type: 'error', message: "Optical clarity insufficient. Ensure the Identity QR is flat and centered." });
       }
@@ -632,12 +638,32 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="p-16 flex justify-center bg-gradient-to-t from-black/90 to-transparent">
-            <button 
-              onClick={handleCapture}
-              className="w-28 h-28 rounded-full border-[10px] border-white/20 bg-primary shadow-[0_0_60px_rgba(16,185,129,0.7)] active:scale-75 transition-all flex items-center justify-center"
-            >
-              <div className="w-12 h-12 rounded-full border-4 border-white/40"></div>
-            </button>
+            <div className="w-full max-w-sm space-y-4">
+              <div className="flex justify-center">
+                <button 
+                  onClick={handleCapture}
+                  className="w-28 h-28 rounded-full border-[10px] border-white/20 bg-primary shadow-[0_0_60px_rgba(16,185,129,0.7)] active:scale-75 transition-all flex items-center justify-center"
+                >
+                  <div className="w-12 h-12 rounded-full border-4 border-white/40"></div>
+                </button>
+              </div>
+              <div className="bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl p-3 space-y-2">
+                <p className="text-[10px] text-slate-300 uppercase tracking-[0.2em] font-bold">Fallback: Paste QR/ID</p>
+                <input
+                  value={manualScanCode}
+                  onChange={(e) => setManualScanCode(e.target.value)}
+                  placeholder='{"userId":"TAG_001","code":"8472910384"} or 8472910384'
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+                <button
+                  onClick={handleManualScanSubmit}
+                  disabled={!manualScanCode.trim()}
+                  className="w-full py-2 rounded-xl bg-secondary text-dark font-black uppercase text-xs tracking-[0.2em] disabled:opacity-40"
+                >
+                  Use Code
+                </button>
+              </div>
+            </div>
           </div>
           <canvas ref={canvasRef} className="hidden" />
         </div>
