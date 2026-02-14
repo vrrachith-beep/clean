@@ -323,8 +323,20 @@ const App: React.FC = () => {
     // Try jsQR first because it works across browsers without BarcodeDetector support.
     try {
       const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const decoded = jsQR(frame.data, frame.width, frame.height);
+      const decoded = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
       if (decoded?.data) return decoded.data;
+
+      // Second pass: binarize image to improve decode reliability on low light / glare.
+      const bin = new Uint8ClampedArray(frame.data);
+      for (let i = 0; i < bin.length; i += 4) {
+        const gray = (bin[i] * 0.299) + (bin[i + 1] * 0.587) + (bin[i + 2] * 0.114);
+        const v = gray > 130 ? 255 : 0;
+        bin[i] = v;
+        bin[i + 1] = v;
+        bin[i + 2] = v;
+      }
+      const decodedBin = jsQR(bin, frame.width, frame.height, { inversionAttempts: 'attemptBoth' });
+      if (decodedBin?.data) return decodedBin.data;
     } catch (error) {
       console.warn('jsQR failed, trying BarcodeDetector fallback.', error);
     }
@@ -333,8 +345,13 @@ const App: React.FC = () => {
     if (!AnyWindow.BarcodeDetector) return null;
     try {
       const detector = new AnyWindow.BarcodeDetector({ formats: ['qr_code'] });
-      const barcodes = await detector.detect(canvas);
-      const value = barcodes?.[0]?.rawValue;
+      // Try both canvas and direct video element for broader browser compatibility.
+      const fromCanvas = await detector.detect(canvas);
+      let value = fromCanvas?.[0]?.rawValue;
+      if (!value && videoRef.current) {
+        const fromVideo = await detector.detect(videoRef.current);
+        value = fromVideo?.[0]?.rawValue;
+      }
       return value ? String(value) : null;
     } catch (error) {
       console.warn('BarcodeDetector failed, falling back to AI scan.', error);
