@@ -23,9 +23,11 @@ const ledgerCollection = collection(db, 'ledger');
 // Initialize users in Firestore if empty
 export const initializeUsers = async (): Promise<void> => {
   const snapshot = await getDocs(usersCollection);
-  if (snapshot.empty) {
-    // Add initial users to Firestore
-    for (const user of INITIAL_USERS) {
+  const existingIds = new Set(snapshot.docs.map((d) => (d.data() as User).id));
+
+  // Ensure all initial user slots exist even if collection is partially populated.
+  for (const user of INITIAL_USERS) {
+    if (!existingIds.has(user.id)) {
       await setDoc(doc(usersCollection, user.id), user);
     }
   }
