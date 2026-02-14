@@ -43,10 +43,10 @@ export const QRRegistry: React.FC<QRRegistryProps> = ({ users }) => {
                 : 'bg-slate-900/20 border-slate-800/30 opacity-60'
             }`}
           >
-            {/* Real scannable QR Code using Google Charts API */}
+            {/* Real scannable QR Code */}
             <div className={`relative w-full aspect-square bg-white rounded-2xl mb-4 flex items-center justify-center p-2 shadow-inner overflow-hidden ${!user.name && 'grayscale'}`}>
               <img 
-                src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(buildQrPayload(user))}`} 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(buildQrPayload(user))}`} 
                 alt={`QR for ${user.code}`}
                 className="w-full h-full object-contain"
               />

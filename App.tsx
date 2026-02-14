@@ -430,7 +430,7 @@ const App: React.FC = () => {
                   
                   <div className="bg-white rounded-2xl p-4 w-48 h-48 mx-auto mb-8 shadow-2xl border-4 border-slate-900">
                     <img 
-                      src={`https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(buildQrPayload(currentUser))}`} 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(buildQrPayload(currentUser))}`} 
                       alt="My QR"
                       className="w-full h-full"
                     />
