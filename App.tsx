@@ -21,6 +21,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 
 const USER_ID_STORAGE_KEY = 'cleancredit_current_user_id';
 const RESET_ON_STARTUP = (import.meta.env.VITE_RESET_ALL_DATA_ON_STARTUP || '').toLowerCase() === 'true';
+const ADMIN_LOGIN_PASSCODE = '2006';
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -40,6 +41,8 @@ const App: React.FC = () => {
   const [registrationName, setRegistrationName] = useState('');
   const [isActivatingTag, setIsActivatingTag] = useState(false);
   const [manualScanCode, setManualScanCode] = useState('');
+  const [showAdminPasscodePrompt, setShowAdminPasscodePrompt] = useState(false);
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState('');
   const html5QrRef = useRef<Html5Qrcode | null>(null);
   const scanHandledRef = useRef(false);
 
@@ -55,7 +58,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const stored = localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (stored) setCurrentUserId(stored);
+    if (!stored) return;
+    if (stored === ADMIN_USER_ID) {
+      setShowAdminPasscodePrompt(true);
+      setAdminPasscodeInput('');
+      return;
+    }
+    setCurrentUserId(stored);
   }, []);
 
   useEffect(() => {
@@ -387,9 +396,36 @@ const App: React.FC = () => {
   };
 
   const selectIdentity = (id: string) => {
+    if (id === ADMIN_USER_ID) {
+      setShowIdentityMenu(false);
+      setAdminPasscodeInput('');
+      setShowAdminPasscodePrompt(true);
+      return;
+    }
     setCurrentUserId(id);
     localStorage.setItem(USER_ID_STORAGE_KEY, id);
     setShowIdentityMenu(false);
+  };
+
+  const submitAdminPasscode = () => {
+    if (adminPasscodeInput !== ADMIN_LOGIN_PASSCODE) {
+      setScanResult({ type: 'error', message: 'Invalid admin passcode.' });
+      return;
+    }
+    setCurrentUserId(ADMIN_USER_ID);
+    localStorage.setItem(USER_ID_STORAGE_KEY, ADMIN_USER_ID);
+    setShowAdminPasscodePrompt(false);
+    setAdminPasscodeInput('');
+    setActiveTab('profile');
+  };
+
+  const cancelAdminPasscode = () => {
+    setShowAdminPasscodePrompt(false);
+    setAdminPasscodeInput('');
+    if (currentUserId === ADMIN_USER_ID) {
+      setCurrentUserId(null);
+      localStorage.removeItem(USER_ID_STORAGE_KEY);
+    }
   };
 
   return (
@@ -704,6 +740,44 @@ const App: React.FC = () => {
                   className="py-4 rounded-2xl font-black uppercase tracking-[0.2em] bg-primary text-white active:scale-95 transition-all"
                 >
                   Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdminPasscodePrompt && (
+        <div className="fixed inset-0 z-[112] flex items-center justify-center p-8 bg-dark/95 backdrop-blur-3xl animate-in zoom-in-95 duration-300">
+          <div className="w-full max-sm p-10 rounded-[3rem] border-4 border-secondary bg-secondary/5 shadow-[0_0_100px_rgba(0,0,0,0.9)]">
+            <div className="text-center">
+              <div className="text-7xl mb-6">🔐</div>
+              <h2 className="text-3xl font-black mb-4 uppercase italic tracking-tighter text-secondary">
+                Admin Login
+              </h2>
+              <p className="text-sm font-bold text-slate-300 mb-6 uppercase tracking-[0.15em]">
+                Enter admin passcode
+              </p>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={adminPasscodeInput}
+                onChange={(e) => setAdminPasscodeInput(e.target.value)}
+                className="w-full bg-slate-900/80 border-2 border-slate-700 rounded-2xl px-4 py-4 text-2xl font-black text-center text-white focus:border-secondary outline-none mb-6 transition-all"
+                placeholder="Passcode"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={cancelAdminPasscode}
+                  className="py-4 rounded-2xl font-black uppercase tracking-[0.2em] bg-slate-700 text-white active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitAdminPasscode}
+                  className="py-4 rounded-2xl font-black uppercase tracking-[0.2em] bg-secondary text-dark active:scale-95 transition-all"
+                >
+                  Login
                 </button>
               </div>
             </div>
