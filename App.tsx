@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, ScanLog, LedgerEntry } from './types';
 import {
   initializeUsers,
+  resetAllData,
   activateUserTag,
   activateUserTagViaRest,
   saveUsers,
@@ -19,6 +20,7 @@ import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './c
 import { Html5Qrcode } from 'html5-qrcode';
 
 const USER_ID_STORAGE_KEY = 'cleancredit_current_user_id';
+const RESET_ON_STARTUP = (import.meta.env.VITE_RESET_ALL_DATA_ON_STARTUP || '').toLowerCase() === 'true';
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -62,7 +64,13 @@ const App: React.FC = () => {
 
     const setupRealtime = async () => {
       try {
-        await initializeUsers();
+        if (RESET_ON_STARTUP) {
+          await resetAllData();
+          localStorage.removeItem(USER_ID_STORAGE_KEY);
+          setCurrentUserId(null);
+        } else {
+          await initializeUsers();
+        }
         unsubUsers = subscribeToUsers(setUsers);
         unsubLogs = subscribeToScanLogs(setLogs);
         unsubLedger = subscribeToLedger(setLedgerEntries);

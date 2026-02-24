@@ -9,11 +9,13 @@ import {
   getDocs, 
   setDoc, 
   addDoc,
+  deleteDoc,
   onSnapshot,
   query,
   orderBy,
   Timestamp,
-  runTransaction
+  runTransaction,
+  writeBatch
 } from 'firebase/firestore';
 
 // Collection references
@@ -32,6 +34,39 @@ export const initializeUsers = async (): Promise<void> => {
       await setDoc(doc(usersCollection, user.id), user);
     }
   }
+};
+
+// Reset all app data: user records are restored to initial slots, logs/ledger are erased.
+export const resetAllData = async (): Promise<void> => {
+  const batch = writeBatch(db);
+
+  for (const user of INITIAL_USERS) {
+    batch.set(doc(usersCollection, user.id), user);
+  }
+
+  const existingUsers = await getDocs(usersCollection);
+  for (const snap of existingUsers.docs) {
+    const data = snap.data() as User;
+    if (!INITIAL_USERS.some((user) => user.id === data.id)) {
+      batch.delete(snap.ref);
+    }
+  }
+
+  await batch.commit();
+
+  const [scanLogs, ledgerEntries] = await Promise.all([
+    getDocs(scanLogsCollection),
+    getDocs(ledgerCollection),
+  ]);
+
+  const deleteOps: Promise<void>[] = [];
+  for (const snap of scanLogs.docs) {
+    deleteOps.push(deleteDoc(snap.ref));
+  }
+  for (const snap of ledgerEntries.docs) {
+    deleteOps.push(deleteDoc(snap.ref));
+  }
+  await Promise.all(deleteOps);
 };
 
 // Get all users from Firestore (one-time fetch)
