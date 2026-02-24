@@ -1,7 +1,10 @@
 
 import { User, Badge } from './types';
 
-// Pre-generated 10-digit codes for the Identity Tags
+export const ADMIN_USER_ID = 'ADMIN';
+export const ADMIN_USER_CODE = '1000000000';
+
+// Pre-generated 10-digit codes for student identity tags
 export const IDENTITY_CODES = [
   "8472910384", "2948571039", "5019283746", "3847562910", "1029384756",
   "9384756102", "4756102938", "7561029384", "6102938475", "2039485716",
@@ -11,7 +14,16 @@ export const IDENTITY_CODES = [
   "7813264950", "3950148627", "1248093765", "5672389014", "9021756438"
 ];
 
-export const INITIAL_USERS: User[] = IDENTITY_CODES.map((code, index) => ({
+export const ADMIN_USER: User = {
+  id: ADMIN_USER_ID,
+  name: 'ADMIN',
+  code: ADMIN_USER_CODE,
+  points: 1000,
+  violationHistory: [],
+  scanCount: 0,
+};
+
+const STUDENT_USERS: User[] = IDENTITY_CODES.map((code, index) => ({
   id: `TAG_${String(index + 1).padStart(3, '0')}`,
   name: '',
   code,
@@ -19,6 +31,8 @@ export const INITIAL_USERS: User[] = IDENTITY_CODES.map((code, index) => ({
   violationHistory: [],
   scanCount: 0,
 }));
+
+export const INITIAL_USERS: User[] = [ADMIN_USER, ...STUDENT_USERS];
 
 export const BADGES: Badge[] = [
   { id: 'b1', name: 'Eagle Eye', icon: '🦅', description: 'Report 1 litterer', threshold: 1 },

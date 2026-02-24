@@ -16,7 +16,7 @@ import { Leaderboard } from './components/Leaderboard';
 import { Analytics } from './components/Analytics';
 import { Badges } from './components/Badges';
 import { QRRegistry } from './components/QRRegistry';
-import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS } from './constants';
+import { REWARD_POINTS, PENALTY_POINTS, SORTING_BONUS, INITIAL_USERS, ADMIN_USER_ID } from './constants';
 import { Html5Qrcode } from 'html5-qrcode';
 
 const USER_ID_STORAGE_KEY = 'cleancredit_current_user_id';
@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const scanHandledRef = useRef(false);
 
   const currentUser = users.find(u => u.id === currentUserId) || null;
+  const isAdmin = currentUser?.id === ADMIN_USER_ID;
   const currentUserLedger = ledgerEntries.filter((entry) => entry.userId === currentUserId);
   const totalCredits = currentUserLedger
     .filter((entry) => entry.type === 'credit')
@@ -224,9 +225,17 @@ const App: React.FC = () => {
 
   const queueViolationFromScan = (scannedValue: string, description: string, wasteType: string) => {
     if (!currentUser) return;
+    if (currentUser.id === ADMIN_USER_ID) {
+      setScanResult({ type: 'error', message: 'Admin identity cannot submit scan reports.' });
+      return;
+    }
     const litterer = resolveUserFromScannedValue(scannedValue);
     if (!litterer) {
       setScanResult({ type: 'error', message: `ID Code ${scannedValue} is not recognized in the campus database.` });
+      return;
+    }
+    if (litterer.id === ADMIN_USER_ID) {
+      setScanResult({ type: 'error', message: 'Admin identity cannot be reported.' });
       return;
     }
     if (litterer.id === currentUser.id) {
@@ -359,7 +368,23 @@ const App: React.FC = () => {
   };
 
   const isRegistered = currentUser && currentUser.name !== '';
-  const availableUsers = users.filter((u) => !u.name);
+  const availableUsers = users.filter((u) => !u.name && u.id !== ADMIN_USER_ID);
+
+  const handleAdminFullReset = async () => {
+    if (!isAdmin) return;
+    const confirmed = window.confirm('Reset everything? This clears all users, logs, and credits/debits except protected ADMIN identity.');
+    if (!confirmed) return;
+    try {
+      await resetAllData();
+      setPendingViolation(null);
+      setScanResult({ type: 'success', message: 'System reset complete. All user data is now fresh.' });
+      localStorage.setItem(USER_ID_STORAGE_KEY, ADMIN_USER_ID);
+      setCurrentUserId(ADMIN_USER_ID);
+      setActiveTab('profile');
+    } catch (error) {
+      setScanResult({ type: 'error', message: getDbErrorMessage(error) });
+    }
+  };
 
   const selectIdentity = (id: string) => {
     setCurrentUserId(id);
@@ -478,19 +503,26 @@ const App: React.FC = () => {
               <Leaderboard users={users} />
               {currentUser && <Badges user={currentUser} />}
               <div className="mt-10 flex flex-col items-center">
-                <button 
-                  onClick={startCamera}
-                  className="group relative w-full h-40 rounded-[2.5rem] overflow-hidden bg-gradient-to-br from-primary to-emerald-800 p-[2px] shadow-2xl shadow-primary/40 active:scale-95 transition-all"
-                >
-                  <div className="bg-dark/60 w-full h-full rounded-[2.4rem] flex flex-col items-center justify-center backdrop-blur-2xl border border-white/10">
-                    <div className="relative mb-3">
-                      <span className="text-6xl block group-hover:scale-110 transition-transform">📷</span>
-                      <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse border-4 border-dark"></div>
+                {!isAdmin && (
+                  <button 
+                    onClick={startCamera}
+                    className="group relative w-full h-40 rounded-[2.5rem] overflow-hidden bg-gradient-to-br from-primary to-emerald-800 p-[2px] shadow-2xl shadow-primary/40 active:scale-95 transition-all"
+                  >
+                    <div className="bg-dark/60 w-full h-full rounded-[2.4rem] flex flex-col items-center justify-center backdrop-blur-2xl border border-white/10">
+                      <div className="relative mb-3">
+                        <span className="text-6xl block group-hover:scale-110 transition-transform">📷</span>
+                        <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse border-4 border-dark"></div>
+                      </div>
+                      <span className="text-2xl font-black tracking-tighter uppercase italic">Scan Trash to Earn</span>
+                      <p className="text-[10px] text-white/50 uppercase tracking-[0.3em] font-bold">Vikasit Bharat • Zero Waste</p>
                     </div>
-                    <span className="text-2xl font-black tracking-tighter uppercase italic">Scan Trash to Earn</span>
-                    <p className="text-[10px] text-white/50 uppercase tracking-[0.3em] font-bold">Vikasit Bharat • Zero Waste</p>
+                  </button>
+                )}
+                {isAdmin && (
+                  <div className="w-full h-40 rounded-[2.5rem] border border-slate-700/60 bg-slate-900/40 flex items-center justify-center text-center px-8">
+                    <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-300">Admin mode enabled</p>
                   </div>
-                </button>
+                )}
               </div>
               <Analytics logs={logs} />
             </div>
@@ -564,6 +596,16 @@ const App: React.FC = () => {
                       )}
                     </div>
                   </div>
+                  {isAdmin && (
+                    <div className="mt-6">
+                      <button
+                        onClick={handleAdminFullReset}
+                        className="w-full py-5 rounded-2xl bg-danger text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-danger/30 active:scale-95 transition-all"
+                      >
+                        Admin: Clear & Reset All Data
+                      </button>
+                    </div>
+                  )}
                </div>
             </div>
           )}

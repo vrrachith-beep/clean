@@ -1,6 +1,6 @@
 
 import { User, ScanLog, LedgerEntry } from '../types';
-import { INITIAL_USERS } from '../constants';
+import { INITIAL_USERS, ADMIN_USER_ID, ADMIN_USER } from '../constants';
 import { db } from '../src/firebase/config';
 import { 
   collection, 
@@ -83,12 +83,20 @@ export const getStoredUsers = async (): Promise<User[]> => {
 // Save users to Firestore (updates existing or creates new)
 export const saveUsers = async (users: User[]): Promise<void> => {
   for (const user of users) {
+    if (user.id === ADMIN_USER_ID) {
+      await setDoc(doc(usersCollection, user.id), { ...ADMIN_USER });
+      continue;
+    }
     await setDoc(doc(usersCollection, user.id), user);
   }
 };
 
 // Activate a user slot even if realtime state hasn't loaded yet.
 export const activateUserTag = async (userId: string, name: string): Promise<void> => {
+  if (userId === ADMIN_USER_ID) {
+    throw new Error('Admin identity is reserved and cannot be claimed.');
+  }
+
   const userRef = doc(usersCollection, userId);
   const snapshot = await getDoc(userRef);
   const initial = INITIAL_USERS.find((u) => u.id === userId);
@@ -114,6 +122,10 @@ export const activateUserTagViaRest = async (
   firebaseApiKey: string,
   firebaseProjectId: string,
 ): Promise<void> => {
+  if (userId === ADMIN_USER_ID) {
+    throw new Error('Admin identity is reserved and cannot be claimed.');
+  }
+
   const initial = INITIAL_USERS.find((u) => u.id === userId);
   const code = initial?.code ?? '';
 
@@ -146,6 +158,10 @@ export const activateUserTagViaRest = async (
 
 // Update a single user in Firestore
 export const updateUser = async (user: User): Promise<void> => {
+  if (user.id === ADMIN_USER_ID) {
+    await setDoc(doc(usersCollection, ADMIN_USER_ID), { ...ADMIN_USER });
+    return;
+  }
   await setDoc(doc(usersCollection, user.id), user);
 };
 
@@ -191,6 +207,10 @@ interface ViolationResult {
 
 // Apply a full violation in one transaction so online users stay consistent.
 export const applyViolationTransaction = async (input: ViolationInput): Promise<ViolationResult> => {
+  if (input.scannerId === ADMIN_USER_ID || input.littererId === ADMIN_USER_ID) {
+    throw new Error('Admin account cannot be used for reporting or penalties.');
+  }
+
   return runTransaction(db, async (tx) => {
     const scannerRef = doc(usersCollection, input.scannerId);
     const littererRef = doc(usersCollection, input.littererId);
